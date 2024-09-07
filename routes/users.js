@@ -1,18 +1,34 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
 
-const saltRounds = 10;
+const saltRounds = 8;
+const SECRET_KEY = 'ilovenodejs'; // Use uma chave secreta segura
 
-// Rota para buscar os usuários da tabela users
-router.get('/', (req, res) => {
+// Middleware para verificar o token JWT
+const authenticateToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) return res.sendStatus(401);
+
+    jwt.verify(token, SECRET_KEY, (err, user) => {
+        if (err) return res.sendStatus(403);
+        req.user = user;
+        next();
+    });
+};
+
+// Rota para buscar os usuários da tabela users (rota protegida)
+router.get('/', authenticateToken, (req, res) => {
     db.query('SELECT * FROM users', (err, results) => {
         if (err) {
             console.log("Erro ao buscar usuário", err);
             return res.status(500).send("Erro ao buscar usuários");
         }
-        res.render('index', { users: results }); // Passa a lista de usuários para o template
+        res.render('index', { users: results });
     });
 });
 
@@ -21,6 +37,7 @@ router.get('/login', (req, res) => {
     res.render('login');
 });
 
+// Login de usuário
 router.post('/login', (req, res) => {
     const { email, password } = req.body;
 
@@ -35,13 +52,12 @@ router.post('/login', (req, res) => {
             return res.status(500).send('Erro ao buscar o usuário');
         }
 
-        // Verifica se o usuário foi encontrado
         if (results.length === 0) {
             return res.status(401).send('Email ou senha inválidos');
         }
 
-        const user = results[0]; // O usuário encontrado no banco de dados
-        const hashPassword = user.password; // O hash de senha armazenado
+        const user = results[0];
+        const hashPassword = user.password;
 
         // Compara a senha fornecida pelo usuário com o hash armazenado usando bcrypt
         bcrypt.compare(password, hashPassword, (err, isMatch) => {
@@ -51,17 +67,15 @@ router.post('/login', (req, res) => {
             }
 
             if (isMatch) {
-                // Se as senhas coincidirem, o login está correto
-                // Redireciona para a página inicial ou o dashboard
-                res.redirect('/');
+                // Se as senhas coincidirem, gera um token JWT
+                const token = jwt.sign({ id: user.id, email: user.email }, SECRET_KEY, { expiresIn: '1h' });
+                res.json({ token }); // Retorna o token para o cliente
             } else {
-                // Se as senhas não coincidirem
                 res.status(401).send('Email ou senha inválidos');
             }
         });
     });
 });
-
 
 // Renderiza a página de registro
 router.get('/register', (req, res) => {
@@ -90,7 +104,7 @@ router.post('/register', (req, res) => {
                 console.log('Erro ao inserir o usuário', err);
                 return res.status(500).send('Erro ao adicionar usuário');
             }
-            res.redirect('/');
+            res.redirect('/login');
         });
     });
 });
